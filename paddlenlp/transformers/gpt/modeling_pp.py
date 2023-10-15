@@ -23,9 +23,11 @@ from paddle.distributed.fleet.utils import recompute
 
 from paddlenlp.transformers.model_utils import PipelinePretrainedModel
 
+from ...te_utils.te_helper import TransformerEngineHelper
 from .modeling import (
     GPTConfig,
     GPTDecoderLayer,
+    GPTDecoderLayerWithNVTEBackend,
     GPTEmbeddings,
     GPTPretrainedModel,
     GPTPretrainingCriterion,
@@ -95,6 +97,18 @@ class GPTEmbeddingPipe(GPTEmbeddings):
         return embeddings
 
 
+class GPTDecoderLayerPipeWithNVTEBackend(GPTDecoderLayerWithNVTEBackend):
+    def forward(self, args):
+        hidden_states, attention_mask, position_ids = parse_args(args)
+        if self.config.use_recompute and self.config.recompute_granularity == "full":
+            recompute_func = TransformerEngineHelper.get_te_recompute_func()
+            hidden_states = recompute_func(super().forward, hidden_states, attention_mask)
+        else:
+            hidden_states = super().forward(hidden_states, attention_mask=attention_mask)
+
+        return return_args(hidden_states, attention_mask, position_ids)
+
+
 class GPTDecoderLayerPipe(GPTDecoderLayer):
     def forward(self, args):
         hidden_states, attention_mask, position_ids = parse_args(args)
@@ -153,9 +167,13 @@ class GPTForCausalLMPipe(PipelinePretrainedModel, PipelineLayer):
             SharedLayerDesc("gpt", GPTEmbeddingPipe, shared_weight_attr="embedding_weight", config=config),
             "gpt.embeddings",
         )
+        DecoderLayerPipe = (
+            GPTDecoderLayerPipe if config.transformer_engine_backend is None else GPTDecoderLayerPipeWithNVTEBackend
+        )
+
         for i in range(config.num_hidden_layers):
             self.add_sequential_layer(
-                LayerDesc(GPTDecoderLayerPipe, config=config),
+                LayerDesc(DecoderLayerPipe, config=config),
                 f"gpt.decoder.layers.{i}",
             )
 

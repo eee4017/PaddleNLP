@@ -45,6 +45,7 @@ from . import (
     peft,
     prompt,
     seq2vec,
+    te_utils,
     trainer,
     transformers,
     utils,

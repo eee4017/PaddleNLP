@@ -22,6 +22,7 @@ from typing import Optional
 
 import paddle
 
+from paddlenlp.te_utils.te_helper import TransformerEngineHelper
 from paddlenlp.trainer import (
     PdArgumentParser,
     Trainer,
@@ -75,6 +76,18 @@ class PreTrainingArguments(TrainingArguments):
         metadata={
             "help": "The steps use to control the learing rate. If the step > decay_steps, will use the min_learning_rate."
         },
+    )
+    transformer_engine_backend: str = field(
+        default=None,
+        metadata={"help": "gpt, whether to use transformer engine backend, [None, 'paddle', 'transformer_engine']"},
+    )
+    use_fp8: bool = field(
+        default=False,
+        metadata={"help": "gpt, whether to use fp8 training"},
+    )
+    recompute_granularity: str = field(
+        default="full",
+        metadata={"help": "full or core_attn."},
     )
 
 
@@ -153,11 +166,10 @@ class ModelArguments:
     )
     hidden_dropout_prob: float = field(default=0.1, metadata={"help": "The hidden dropout prob."})
     attention_probs_dropout_prob: float = field(default=0.1, metadata={"help": "The attention hidden dropout prob."})
-    continue_training: bool = field(
-        default=True,
-        metadata={
-            "help": "Pre-training from existing paddlenlp model weights. Default False and model will train from scratch. If set True, the model_name_or_path argument must exist in the paddlenlp models."
-        },
+
+    te_init_weight_path: str = field(
+        default=None,
+        metadata={"help": "path to initial weights for TE"},
     )
 
 
@@ -386,7 +398,15 @@ def main():
     config.enable_fuse_transformer = model_args.enable_fuse_transformer
     config.fuse_attention_qkv = model_args.fuse_attention_qkv
     config.use_recompute = training_args.recompute
+    config.recompute_granularity = training_args.recompute_granularity
     config.use_flash_attention = model_args.use_flash_attention
+    if training_args.transformer_engine_backend is not None:
+        assert training_args.transformer_engine_backend in [
+            "paddle",
+            "transformer_engine",
+        ], "Only support paddle and transformer_engine backend"
+    config.transformer_engine_backend = training_args.transformer_engine_backend
+    config.use_fp8 = training_args.use_fp8
 
     config.tensor_parallel_degree = training_args.tensor_parallel_degree
     config.tensor_parallel_rank = training_args.tensor_parallel_rank
@@ -441,6 +461,25 @@ def main():
         data_args, training_args, data_file, tokenizer
     )
 
+    checkpoint = None
+    if training_args.resume_from_checkpoint is not None:
+        checkpoint = training_args.resume_from_checkpoint
+    elif last_checkpoint is not None:
+        checkpoint = last_checkpoint
+
+    if checkpoint is None and model_args.te_init_weight_path is None:
+        logger.info("No checkpoint. Initializing model from scratch")
+        model.init_weights()
+
+    if model_args.te_init_weight_path is not None:
+        if checkpoint is not None:
+            raise ValueError(
+                "Please do not provide last_checkpoint and te_init_weight_path at the same time."
+                "To load TE initial weights, please clean up the output_dir and remove --resume_from_checkpoint."
+            )
+        logger.info(f"Loading TE initial weights from {model_args.te_init_weight_path}")
+        TransformerEngineHelper.reset_te_init_weights(model, model_args.te_init_weight_path, config)
+
     trainer = PretrainingTrainer(
         model=model,
         args=training_args,
@@ -450,12 +489,6 @@ def main():
         optimizers=(None, lr_scheduler),
         tokenizer=tokenizer,
     )
-
-    checkpoint = None
-    if training_args.resume_from_checkpoint is not None:
-        checkpoint = training_args.resume_from_checkpoint
-    elif last_checkpoint is not None:
-        checkpoint = last_checkpoint
 
     # Training
     if training_args.do_train:

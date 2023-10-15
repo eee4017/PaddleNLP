@@ -77,6 +77,7 @@ from ..data import (
     default_data_collator,
 )
 from ..peft import LoRAModel, PrefixModelForCausalLM
+from ..te_utils.te_helper import TransformerEngineHelper
 from ..transformers.model_utils import (
     PretrainedModel,
     _add_variant,
@@ -341,6 +342,7 @@ class Trainer:
             self.enable_autocast_context_manager = True
             self.do_grad_scaling = True if args.fp16 else False
             self.amp_dtype = "float16" if args.fp16 else "bfloat16"
+            self.use_fp8 = args.use_fp8
             # fix for load saved fp16 or bf16 ckpt, decorate model first.
             if self.args.fp16_opt_level == "O2":
                 if self.amp_dtype == "bfloat16":
@@ -783,6 +785,14 @@ class Trainer:
 
         self.timers and self.timers("read-data").start()
 
+        _enable_profile = int(os.environ.get("ENABLE_PROFILE", 0))
+        _start_step = int(os.environ.get("PROFILE_START_STEP", 0))
+        _stop_step = int(os.environ.get("PROFILE_STOP_STEP", 0))
+        _emit_nvtx = int(os.environ.get("PROFILE_EMIT_NVTX", 0))
+
+        if _enable_profile and _emit_nvtx:
+            paddle.fluid.core.nvprof_enable_record_event()
+
         for epoch in range(epochs_trained, num_train_epochs):
             if isinstance(train_dataloader, paddle.io.DataLoader) and isinstance(
                 train_dataloader.batch_sampler, DistributedBatchSampler
@@ -793,6 +803,11 @@ class Trainer:
             self.control = self.callback_handler.on_epoch_begin(args, self.state, self.control)
 
             for step, inputs in enumerate(epoch_iterator):
+                if _enable_profile and step == _start_step:
+                    paddle.fluid.core.nvprof_start()
+                if _enable_profile and step == _stop_step + 1:
+                    paddle.fluid.core.nvprof_stop()
+
                 self.timers and self.timers("read-data").stop()
                 os.environ["TRAINER_GLOBAL_STEP"] = str(self.state.global_step)
                 self.callback_handler.on_load_data_end(args, self.state, self.control, inputs=inputs)
@@ -1709,10 +1724,11 @@ class Trainer:
         elif isinstance(data, paddle.Tensor):
             # kwargs = dict(device=self.args.current_device)
             # update data type for pure fp16
-            if data.place.is_cuda_pinned_place():
-                return data.cuda()
-            return data
+            # if data.place.is_cuda_pinned_place():
+            #     return data.cuda()
+            # return data
             # return data.to(**kwargs)
+            return data._to(self.args.current_device, None, False)
         return data
 
     def _prepare_inputs(self, inputs: Dict[str, Union[paddle.Tensor, Any]]) -> Dict[str, Union[paddle.Tensor, Any]]:
@@ -1823,7 +1839,8 @@ class Trainer:
         inputs = self._prepare_inputs(inputs)
 
         with self.autocast_smart_context_manager():
-            loss = self.compute_loss(model, inputs)
+            with TransformerEngineHelper.fp8_autocast(enabled=self.use_fp8):
+                loss = self.compute_loss(model, inputs)
 
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps

@@ -31,6 +31,8 @@ from paddle.distributed.fleet.meta_parallel import get_rng_state_tracker
 from paddle.distributed.fleet.utils import recompute
 from paddle.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
+from ...te_utils.te_helper import TransformerEngineHelper
+from ...te_utils.te_modeling import GPTDecoderLayerWithNVTEBackend
 from ...utils.converter import StateDictNameMapping
 from ...utils.log import logger
 from .. import PretrainedModel, register_base_model
@@ -233,10 +235,12 @@ class MultiHeadAttention(nn.Layer):
     def _fuse_prepare_qkv(self, query, use_cache=False, past_key_value=None):
         # bs, seq_len, num_head * 3*head_dim
         mix_layer = self.qkv_proj(query)
-        # bs, seq_len, num_head, 3*head_dim
-        mix_layer = paddle.reshape_(mix_layer, [0, 0, self.num_attention_heads, 3 * self.head_dim])
+
+        # transformer_engine's dot product attention only support input shape [bs, seq_len, 3, num_head, head_dim]
+        # so we also use this shape for paddle's dot product attention for better alignment
+        mix_layer = paddle.reshape_(mix_layer, [0, 0, 3 * self.num_attention_heads, self.head_dim])
         # query_states, key_states, value_states => bs, seq_len, num_head, head_dim
-        query_states, key_states, value_states = paddle.split(mix_layer, num_or_sections=3, axis=-1)
+        query_states, key_states, value_states = paddle.split(mix_layer, num_or_sections=3, axis=2)
 
         # [bs, seq_len, num_head, head_dim]
         if past_key_value is not None:
@@ -394,6 +398,9 @@ class TransformerDecoder(nn.Layer):
         # Recompute defaults to False and is controlled by Trainer
         self.enable_recompute = False
 
+        if config.transformer_engine_backend is not None:
+            self.enable_recompute = config.use_recompute
+
     @paddle.jit.not_to_static
     def recompute_training(
         self,
@@ -410,11 +417,13 @@ class TransformerDecoder(nn.Layer):
 
             return custom_forward
 
-        # GPTDecoderLayer
-        # def forward(
-        #     self, hidden_states, attention_mask=None, use_cache=False, past_key_value=None, output_attentions=False
-        # ):
-        hidden_states = recompute(
+        recompute_func = (
+            recompute
+            if self.config.transformer_engine_backend is None
+            else TransformerEngineHelper.get_te_recompute_func()
+        )
+
+        hidden_states = recompute_func(
             create_custom_forward(layer_module),
             hidden_states,
             attention_mask,
@@ -446,8 +455,8 @@ class TransformerDecoder(nn.Layer):
 
         for i, mod in enumerate(self.layers):
             has_gradient = not output.stop_gradient
-            # def forward(self, hidden_states, attention_mask=None, use_cache=False, past_key_value=None, output_attentions=False):
-            if self.enable_recompute and has_gradient:
+            # def forward(self, tgt, memory, tgt_mask=None, use_cache=False, cache=None, output_attentions=False):
+            if self.enable_recompute and has_gradient and self.config.recompute_granularity == "full":
                 outputs = self.recompute_training(
                     layer_module=mod,
                     hidden_states=output,
@@ -828,6 +837,10 @@ class GPTPretrainedModel(PretrainedModel):
                         shape=layer.weight.shape,
                     )
                 )
+
+        # If TE is enabled, init TE weights. Otherwise, do nothing.
+        TransformerEngineHelper.te_init_weights(layer, self.config)
+
         # Layer.apply is DFS https://github.com/PaddlePaddle/Paddle/blob/a6f5021fcc58b21f4414bae6bf4731ef6971582c/python/paddle/nn/layer/layers.py#L527-L530
         # sublayer is init first
         # scale RowParallelLinear weight
@@ -917,9 +930,13 @@ class GPTModel(GPTPretrainedModel):
 
         self.embeddings = GPTEmbeddings(config)
 
+        decoder_layer = (
+            GPTDecoderLayer if config.transformer_engine_backend is None else GPTDecoderLayerWithNVTEBackend
+        )
+
         decoder_layers = nn.LayerList()
         for i in range(config.num_hidden_layers):
-            decoder_layers.append(GPTDecoderLayer(config))
+            decoder_layers.append(decoder_layer(config))
 
         self.decoder = TransformerDecoder(
             config,
