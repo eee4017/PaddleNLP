@@ -337,6 +337,7 @@ class Trainer:
         self.do_grad_scaling = False
         self.enable_autocast_context_manager = False
 
+        self.use_fp8 = False
         if args.fp16 or args.bf16:
             logger.info("Using half precision")
             self.enable_autocast_context_manager = True
