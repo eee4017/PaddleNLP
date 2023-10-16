@@ -43,7 +43,6 @@ dp=`expr $((8*SLURM_JOB_NUM_NODES)) / ${tp} / ${fsdp}`
 log_dir="N${SLURM_JOB_NUM_NODES}_DP${dp}_TP${tp}_FSDP${fsdp}_MBS${per_device_batch_size}_${backend}_${precision}_${recompute}"
 rm -rf $log_dir
 output_dir="${PNLP_PATH}/llm/gpt-3/output/$log_dir"
-rm -rf $output_dir
 
 IP_STR=${IP_STR:='127.0.0.1'}
 
