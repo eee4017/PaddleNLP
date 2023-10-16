@@ -71,8 +71,8 @@ class TransformerEngineHelper:
         if TransformerEngineHelper.is_installed():
             with te.fp8_autocast(enabled=enabled):
                 yield
-        else:
-            pass
+        else:  # null context
+            yield
 
     @staticmethod
     def te_init_weights(layer, config):
