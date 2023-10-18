@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import argparse
+import json
 import os
 from collections import OrderedDict
 
@@ -71,6 +72,31 @@ def get_ckpt_filename(ckpt_path):
     return ckpt_filename_list
 
 
+def convert_sharded_ckpt_index(ckpt_path, output_path, mode):
+    # has model_state.pdparams.index.json
+    ckpt_files = os.listdir(ckpt_path)
+    ckpt_filename_list = [file for file in ckpt_files if file.endswith(".index.json")]
+    if len(ckpt_filename_list) == 0:
+        return
+    assert len(ckpt_filename_list) == 1, "If there is a index.json file, there should be only one."
+    index_file = ckpt_filename_list[0]
+    index_file_full_path = os.path.join(ckpt_path, index_file)
+    # read json file, replace the param name in the map, and save it to output_path
+    with open(index_file_full_path, "r", encoding="utf-8") as f:
+        index = json.load(f)
+    new_index = OrderedDict()
+    for name, param in index.items():
+        if name != "weight_map":
+            new_index[name] = param
+    for name, param in index["weight_map"].items():
+        new_name = convert_param_name(mode, name)
+        new_index["weight_map"][new_name] = param
+
+    output_file_full_path = os.path.join(output_path, index_file)
+    with open(output_file_full_path, "w", encoding="utf-8") as f:
+        json.dump(new_index, f, indent=4)
+
+
 def convert_param_name(mode, param_name):
     """
     Convert the paddle parameter name from PD to TE, or from TE to PD.
@@ -94,13 +120,13 @@ def convert_param_name(mode, param_name):
     return new_param_name
 
 
-def check_params(state_dict, mode):
+def check_params(all_params_name, mode):
     """
     Check the parameters in the state dict.
     """
     te_name_exist = False
     pd_name_exist = False
-    for name, param in state_dict.items():
+    for name in all_params_name:
         if "transformer" in name:
             te_name_exist = True
         if "self_attn" in name:
@@ -133,12 +159,20 @@ def convert_ckpt(args):
     ckpt_filename_list = get_ckpt_filename(args.input_ckpt_path)
     assert len(ckpt_filename_list) > 0, "No checkpoint file found in the input path."
 
+    # check if params name match the mode
+    all_params_name = []
+    for ckpt_filename in ckpt_filename_list:
+        ckpt_file_full_path = os.path.join(args.input_ckpt_path, ckpt_filename)
+        state_dict = paddle.load(ckpt_file_full_path)
+        for name, param in state_dict.items():
+            all_params_name.append(name)
+    check_params(all_params_name, args.mode)
+
     # convert ckpt
     for ckpt_filename in ckpt_filename_list:
         # convert pd model to TE model
         ckpt_file_full_path = os.path.join(args.input_ckpt_path, ckpt_filename)
         state_dict = paddle.load(ckpt_file_full_path)
-        check_params(state_dict, args.mode)
         new_state_dict = OrderedDict()
         for name, param in state_dict.items():
             # print(f"PD Layer: {name} | Size: {param.shape}")
@@ -152,6 +186,9 @@ def convert_ckpt(args):
             # print(f"TE Layer: {te_param_name} | Size: {te_state_dict[te_param_name].shape}")
         output_ckpt_file_full_path = os.path.join(args.output_ckpt_path, ckpt_filename)
         paddle.save(new_state_dict, output_ckpt_file_full_path)
+
+    # convert sharded ckpt index if exists
+    convert_sharded_ckpt_index(args.input_ckpt_path, args.output_ckpt_path, args.mode)
 
 
 if __name__ == "__main__":
