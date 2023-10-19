@@ -75,26 +75,29 @@ def get_ckpt_filename(ckpt_path):
 def convert_sharded_ckpt_index(ckpt_path, output_path, mode):
     # has model_state.pdparams.index.json
     ckpt_files = os.listdir(ckpt_path)
-    ckpt_filename_list = [file for file in ckpt_files if file.endswith(".index.json")]
-    if len(ckpt_filename_list) == 0:
+    index_filename_list = [
+        file for file in ckpt_files if file.endswith(".json") and file.startswith("model_state.pdparams.index")
+    ]
+    if len(index_filename_list) == 0:
         return
-    assert len(ckpt_filename_list) == 1, "If there is a index.json file, there should be only one."
-    index_file = ckpt_filename_list[0]
-    index_file_full_path = os.path.join(ckpt_path, index_file)
-    # read json file, replace the param name in the map, and save it to output_path
-    with open(index_file_full_path, "r", encoding="utf-8") as f:
-        index = json.load(f)
-    new_index = OrderedDict()
-    for name, param in index.items():
-        if name != "weight_map":
-            new_index[name] = param
-    for name, param in index["weight_map"].items():
-        new_name = convert_param_name(mode, name)
-        new_index["weight_map"][new_name] = param
 
-    output_file_full_path = os.path.join(output_path, index_file)
-    with open(output_file_full_path, "w", encoding="utf-8") as f:
-        json.dump(new_index, f, indent=4)
+    for index_file in index_filename_list:
+        index_file_full_path = os.path.join(ckpt_path, index_file)
+        # read json file, replace the param name in the map, and save it to output_path
+        with open(index_file_full_path, "r", encoding="utf-8") as f:
+            index = json.load(f)
+        new_index = OrderedDict()
+        new_index["weight_map"] = OrderedDict()
+        for name, param in index.items():
+            if name != "weight_map":
+                new_index[name] = param
+        for name, param in index["weight_map"].items():
+            new_name = convert_param_name(mode, name)
+            new_index["weight_map"][new_name] = param
+
+        output_file_full_path = os.path.join(output_path, index_file)
+        with open(output_file_full_path, "w", encoding="utf-8") as f:
+            json.dump(new_index, f, indent=4)
 
 
 def convert_param_name(mode, param_name):

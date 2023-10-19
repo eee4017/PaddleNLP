@@ -471,15 +471,6 @@ def main():
         logger.info("No checkpoint. Initializing model from scratch")
         model.init_weights()
 
-    if model_args.te_init_weight_path is not None:
-        if checkpoint is not None:
-            raise ValueError(
-                "Please do not provide last_checkpoint and te_init_weight_path at the same time."
-                "To load TE initial weights, please clean up the output_dir and remove --resume_from_checkpoint."
-            )
-        logger.info(f"Loading TE initial weights from {model_args.te_init_weight_path}")
-        TransformerEngineHelper.reset_te_init_weights(model, model_args.te_init_weight_path, config)
-
     trainer = PretrainingTrainer(
         model=model,
         args=training_args,
@@ -489,6 +480,15 @@ def main():
         optimizers=(None, lr_scheduler),
         tokenizer=tokenizer,
     )
+
+    if model_args.te_init_weight_path is not None:
+        if checkpoint is not None:
+            raise ValueError(
+                "Please do not provide last_checkpoint and te_init_weight_path at the same time."
+                "To load TE initial weights, please clean up the output_dir and remove --resume_from_checkpoint."
+            )
+        logger.info(f"Loading TE initial weights from {model_args.te_init_weight_path}")
+        TransformerEngineHelper.reset_te_init_weights(trainer, model_args.te_init_weight_path)
 
     # Training
     if training_args.do_train:

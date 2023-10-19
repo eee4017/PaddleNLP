@@ -12,13 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import re
 from contextlib import contextmanager
 
 import paddle
-
-from paddlenlp.transformers.model_utils import load_sharded_checkpoint
 
 try:
     import transformer_engine.paddle as te
@@ -116,36 +112,8 @@ class TransformerEngineHelper:
                 )
 
     @staticmethod
-    def reset_te_init_weights(model, ckpt_path, config):
+    def reset_te_init_weights(trainer, ckpt_path):
         if not TransformerEngineHelper.is_installed() or ckpt_path is None:
             return
 
-        # get files from ckpt_path
-        ckpt_files = os.listdir(ckpt_path)
-        ckpt_files = [x for x in ckpt_files if x.endswith(".pdparams")]
-        if config.tensor_parallel_degree > 1:
-            assert (
-                len(ckpt_files) == config.tensor_parallel_degree
-            ), "number of ckpt files must be equal to tensor_parallel_degree"
-            filename = get_filename_for_this_rank(ckpt_files, config.tensor_parallel_rank)
-        elif len(ckpt_files) > 1:
-            # sharded ckpt. For example: model_state-00001-of-00002.pdparams
-            # check the filename, must has 0000x-of-0000x pattern in filename
-            for filename in ckpt_files:
-                result = re.search(r"\d+-of-\d+", filename)
-                assert result is not None, "filename must has 0000x-of-0000x pattern"
-            missing_keys, unexpected_keys = load_sharded_checkpoint(model, ckpt_path)
-            assert len(missing_keys) == 0, "missing keys must be empty"
-            assert len(unexpected_keys) == 0, "unexpected keys must be empty"
-            return
-        else:
-            assert len(ckpt_files) == 1, "number of ckpt files must be equal to 1"
-            filename = ckpt_files[0]
-
-        state_dict = paddle.load(os.path.join(ckpt_path, filename))
-        original_state_dict = model.state_dict()
-        check_params_valid(state_dict, original_state_dict)
-        for name, param in state_dict.items():
-            # print(f"TE Layer: {name} | Size: {param.shape} | dtype: {param.dtype}")
-            state_dict[name] = param
-        model.set_state_dict(state_dict)
+        trainer._load_from_checkpoint(resume_from_checkpoint=ckpt_path)
