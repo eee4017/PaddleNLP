@@ -193,6 +193,10 @@ def convert_ckpt(args):
     # convert sharded ckpt index if exists
     convert_sharded_ckpt_index(args.input_ckpt_path, args.output_ckpt_path, args.mode)
 
+    print(
+        f"Convert checkpoint from {args.input_ckpt_path} to {args.output_ckpt_path} with mode {args.mode} successfully."
+    )
+
 
 if __name__ == "__main__":
     args = parse_args()
