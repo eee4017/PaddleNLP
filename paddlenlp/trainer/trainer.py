@@ -343,7 +343,7 @@ class Trainer:
             self.enable_autocast_context_manager = True
             self.do_grad_scaling = True if args.fp16 else False
             self.amp_dtype = "float16" if args.fp16 else "bfloat16"
-            self.use_fp8 = args.use_fp8
+            self.use_fp8 = args.use_fp8 if hasattr(args, "use_fp8") else False
             # fix for load saved fp16 or bf16 ckpt, decorate model first.
             if self.args.fp16_opt_level == "O2":
                 if self.amp_dtype == "bfloat16":
