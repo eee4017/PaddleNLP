@@ -98,6 +98,29 @@ class TestConverter(unittest.TestCase):
         print(f"converter cmd: {cmd}")
         return cmd
 
+    def check_log(self):
+        # check if the log file exists
+        self.assertTrue(os.path.exists(self.pretrain_log))
+        self.assertTrue(os.path.exists(self.convert_pd2te_log))
+        self.assertTrue(os.path.exists(self.convert_te2pd_log))
+        self.assertTrue(os.path.exists(self.pretrain_te2pd_log))
+        self.assertTrue(os.path.exists(self.pretrain_pd2te_log))
+
+        # check if the log file contains the correct info
+        with open(self.pretrain_log, "r") as f:
+            self.assertTrue("Saving model checkpoint" in f.read())
+        with open(self.convert_pd2te_log, "r") as f:
+            self.assertTrue("success" in f.read())
+        with open(self.convert_te2pd_log, "r") as f:
+            self.assertTrue("success" in f.read())
+        with open(self.pretrain_te2pd_log, "r") as f:
+            self.assertTrue("Saving model checkpoint" in f.read())
+        with open(self.pretrain_pd2te_log, "r") as f:
+            self.assertTrue("Saving model checkpoint" in f.read())
+
+        # rm the log file
+        os.system("rm -rf logs/tmp*")
+
     def check_ckpt_converter(self):
         # clear output dir if not empty
         if os.path.exists("output/tmp"):
@@ -112,7 +135,8 @@ class TestConverter(unittest.TestCase):
         # use subprocess to run the command
         output = subprocess.check_output(cmd, shell=True)
         # save output to file
-        with open("logs/tmp/pretrain_output.txt", "w") as f:
+        self.pretrain_log = "logs/tmp/pretrain_output.txt"
+        with open(self.pretrain_log, "w") as f:
             f.write(str(output))
 
         # convert from pd to te
@@ -128,7 +152,8 @@ class TestConverter(unittest.TestCase):
         # use subprocess to run the command
         output = subprocess.check_output(convert_cmd, shell=True)
         # save output to file
-        with open("logs/tmp/convert_pd2te_output.txt", "w") as f:
+        self.convert_pd2te_log = "logs/tmp/convert_pd2te_output.txt"
+        with open(self.convert_pd2te_log, "w") as f:
             f.write(str(output))
 
         # convert from te to pd
@@ -144,7 +169,8 @@ class TestConverter(unittest.TestCase):
         # use subprocess to run the command
         output = subprocess.check_output(convert_cmd, shell=True)
         # save output to file
-        with open("logs/tmp/convert_te2pd_output.txt", "w") as f:
+        self.convert_te2pd_log = "logs/tmp/convert_te2pd_output.txt"
+        with open(self.convert_te2pd_log, "w") as f:
             f.write(str(output))
 
         # rm the original output dir to avoid auto loading
@@ -157,8 +183,12 @@ class TestConverter(unittest.TestCase):
         # use subprocess to run the command
         output = subprocess.check_output(cmd, shell=True)
         # save output to file
-        with open("logs/tmp/pretrain_output_te2pd.txt", "w") as f:
+        self.pretrain_te2pd_log = "logs/tmp/pretrain_output_te2pd.txt"
+        with open(self.pretrain_te2pd_log, "w") as f:
             f.write(str(output))
+
+        # rm the original output dir to avoid auto loading
+        os.system("rm -rf output/tmp/*")
 
         # run the pretrain again with converted te checkpoint
         self.backend = "transformer_engine"
@@ -167,11 +197,15 @@ class TestConverter(unittest.TestCase):
         # use subprocess to run the command
         output = subprocess.check_output(cmd, shell=True)
         # save output to file
-        with open("logs/tmp/pretrain_output_pd2te.txt", "w") as f:
+        self.pretrain_pd2te_log = "logs/tmp/pretrain_output_pd2te.txt"
+        with open(self.pretrain_pd2te_log, "w") as f:
             f.write(str(output))
 
         # rm the output dir
         os.system("rm -rf output/tmp*")
+
+        # check the log file
+        self.check_log()
 
     def test_check_ckpt_converter_fsdp(self):
         self.dp_size, self.tp_size, self.fsdp_size = 1, 1, 8
