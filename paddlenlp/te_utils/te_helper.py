@@ -66,9 +66,9 @@ class TransformerEngineHelper:
 
     @staticmethod
     @contextmanager
-    def fp8_autocast(enabled=False):
+    def fp8_autocast(enabled=False, fp8_group=None):
         if TransformerEngineHelper.is_installed():
-            with te.fp8_autocast(enabled=enabled):
+            with te.fp8_autocast(enabled=enabled, fp8_group=fp8_group):
                 yield
         else:  # null context
             yield

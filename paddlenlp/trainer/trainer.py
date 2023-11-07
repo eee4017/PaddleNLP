@@ -1903,7 +1903,8 @@ class Trainer:
         model.lr_scheduler = None
 
         with self.autocast_smart_context_manager():
-            loss = model.forward_backward_pipeline(inputs, self.scaler if self.do_grad_scaling else None)
+            with TransformerEngineHelper.fp8_autocast(enabled=self.use_fp8, fp8_group=self.dp_group):
+                loss = model.forward_backward_pipeline(inputs, self.scaler if self.do_grad_scaling else None)
 
         model.micro_batch_size, model.accumulate_steps = config_backup
 
