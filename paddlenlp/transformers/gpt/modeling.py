@@ -31,10 +31,9 @@ from paddle.distributed.fleet.meta_parallel import get_rng_state_tracker
 from paddle.distributed.fleet.utils import recompute
 from paddle.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
-from ...te_utils.te_helper import TransformerEngineHelper
-from ...te_utils.te_modeling import GPTDecoderLayerWithNVTEBackend
 from ...utils.converter import StateDictNameMapping
 from ...utils.log import logger
+from ...utils.transformer_engine_utils import TransformerEngineHelper
 from .. import PretrainedModel, register_base_model
 from ..model_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
@@ -623,6 +622,45 @@ class GPTDecoderLayer(nn.Layer):
         ]
 
         return tuple(v for v in temp_list if v is not None)
+
+
+class GPTDecoderLayerWithNVTEBackend(nn.Layer):
+    """
+    The transformer decoder layer using Transformer Backend.
+    """
+
+    def __init__(self, config: GPTConfig):
+
+        super(GPTDecoderLayerWithNVTEBackend, self).__init__()
+
+        self.config = config
+        self.use_fp8 = config.use_fp8
+        self.fp8_group = TransformerEngineHelper.get_fp8_group()
+        TransformerLayer = TransformerEngineHelper.get_transformer_layer()
+        self.transformer = TransformerLayer(
+            hidden_size=config.hidden_size,
+            ffn_hidden_size=config.intermediate_size,
+            num_attention_heads=config.num_attention_heads,
+            hidden_dropout=config.hidden_dropout_prob,
+            attention_dropout=config.attention_probs_dropout_prob,
+            self_attn_mask_type="causal",
+            layer_type="encoder",
+            activation=config.hidden_activation,
+            set_parallel_mode=config.tensor_parallel_degree > 1,
+            backend=config.transformer_engine_backend,
+        )
+
+    def forward(
+        self, hidden_states, attention_mask=None, use_cache=False, past_key_value=None, output_attentions=False
+    ):
+        with TransformerEngineHelper.fp8_autocast(enabled=self.use_fp8, fp8_group=self.fp8_group):
+            return self.transformer(
+                hidden_states,
+                attention_mask,
+                recompute_core_attention=(
+                    self.config.use_recompute and self.config.recompute_granularity == "core_attn"
+                ),
+            )
 
 
 class GPTEmbeddings(nn.Layer):

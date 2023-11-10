@@ -77,7 +77,6 @@ from ..data import (
     default_data_collator,
 )
 from ..peft import LoRAModel, PrefixModelForCausalLM
-from ..te_utils.te_helper import TransformerEngineHelper
 from ..transformers.model_utils import (
     PretrainedModel,
     _add_variant,
@@ -337,13 +336,11 @@ class Trainer:
         self.do_grad_scaling = False
         self.enable_autocast_context_manager = False
 
-        self.use_fp8 = False
         if args.fp16 or args.bf16:
             logger.info("Using half precision")
             self.enable_autocast_context_manager = True
             self.do_grad_scaling = True if args.fp16 else False
             self.amp_dtype = "float16" if args.fp16 else "bfloat16"
-            self.use_fp8 = args.use_fp8 if hasattr(args, "use_fp8") else False
             # fix for load saved fp16 or bf16 ckpt, decorate model first.
             if self.args.fp16_opt_level == "O2":
                 if self.amp_dtype == "bfloat16":
@@ -1839,8 +1836,7 @@ class Trainer:
         inputs = self._prepare_inputs(inputs)
 
         with self.autocast_smart_context_manager():
-            with TransformerEngineHelper.fp8_autocast(enabled=self.use_fp8):
-                loss = self.compute_loss(model, inputs)
+            loss = self.compute_loss(model, inputs)
 
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
@@ -1903,8 +1899,7 @@ class Trainer:
         model.lr_scheduler = None
 
         with self.autocast_smart_context_manager():
-            with TransformerEngineHelper.fp8_autocast(enabled=self.use_fp8, fp8_group=self.dp_group):
-                loss = model.forward_backward_pipeline(inputs, self.scaler if self.do_grad_scaling else None)
+            loss = model.forward_backward_pipeline(inputs, self.scaler if self.do_grad_scaling else None)
 
         model.micro_batch_size, model.accumulate_steps = config_backup
 

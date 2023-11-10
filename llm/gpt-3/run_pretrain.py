@@ -22,7 +22,6 @@ from typing import Optional
 
 import paddle
 
-from paddlenlp.te_utils.te_helper import TransformerEngineHelper
 from paddlenlp.trainer import (
     PdArgumentParser,
     Trainer,
@@ -41,6 +40,7 @@ from paddlenlp.transformers import (
 )
 from paddlenlp.utils.batch_sampler import DistributedBatchSampler
 from paddlenlp.utils.log import logger
+from paddlenlp.utils.transformer_engine_utils import TransformerEngineHelper
 
 MODEL_CLASSES = {
     "gpt": (
@@ -400,6 +400,7 @@ def main():
     config.use_recompute = training_args.recompute
     config.recompute_granularity = training_args.recompute_granularity
     config.use_flash_attention = model_args.use_flash_attention
+
     if training_args.transformer_engine_backend is not None:
         assert training_args.transformer_engine_backend in [
             "paddle",

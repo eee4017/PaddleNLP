@@ -23,7 +23,7 @@ from paddle.distributed.fleet.utils import recompute
 
 from paddlenlp.transformers.model_utils import PipelinePretrainedModel
 
-from ...te_utils.te_helper import TransformerEngineHelper
+from ...utils.transformer_engine_utils import TransformerEngineHelper
 from .modeling import (
     GPTConfig,
     GPTDecoderLayer,

@@ -15,6 +15,9 @@
 from contextlib import contextmanager
 
 import paddle
+from paddle.distributed import fleet
+
+from .log import logger
 
 try:
     import transformer_engine.paddle as te
@@ -63,6 +66,43 @@ class TransformerEngineHelper:
             TransformerEngineHelper.is_installed()
         ), "TransformerEngine is not installed. Please install it first or disable it."
         return te.recompute
+
+    @staticmethod
+    def get_fp8_group():
+        assert (
+            TransformerEngineHelper.is_installed()
+        ), "TransformerEngine is not installed. Please install it first or disable it."
+
+        hcg = fleet.get_hybrid_communicate_group()
+        use_pp = hcg.get_pipe_parallel_world_size() > 1
+        if not use_pp:
+            return None
+
+        dp_group = hcg.get_data_parallel_group()
+        tp_group = hcg.get_model_parallel_group()
+        pp_group = hcg.get_pipe_parallel_group()
+
+        local_tp_group_tensor = paddle.to_tensor(tp_group.ranks)
+        local_fp8_group_tensor_list = []
+        global_fp8_group_tensor_list = []
+        local_fp8_group_set = set()
+        global_fp8_group_list = []
+
+        paddle.distributed.all_gather(local_fp8_group_tensor_list, local_tp_group_tensor, group=dp_group)
+        for tensor in local_fp8_group_tensor_list:
+            local_fp8_group_set.update(tensor.tolist())
+        local_fp8_group_tensor = paddle.to_tensor(list(local_fp8_group_set))
+        paddle.distributed.all_gather(global_fp8_group_tensor_list, local_fp8_group_tensor, group=pp_group)
+        for tensor in global_fp8_group_tensor_list:
+            global_fp8_group_list.append(tensor.tolist())
+        for group in global_fp8_group_list:
+            comm_group = paddle.distributed.new_group(group)
+            global_rank = paddle.distributed.get_rank()
+            if global_rank in group:
+                fp8_group = comm_group
+
+        logger.info("fp8 group is {}".format(fp8_group))
+        return fp8_group
 
     @staticmethod
     @contextmanager
