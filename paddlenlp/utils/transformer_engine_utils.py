@@ -81,6 +81,10 @@ class TransformerEngineHelper:
         dp_group = hcg.get_data_parallel_group()
         tp_group = hcg.get_model_parallel_group()
         pp_group = hcg.get_pipe_parallel_group()
+        if dp_group.nranks <= 1:
+            return tp_group
+        if tp_group.nranks <= 1:
+            return dp_group
 
         local_tp_group_tensor = paddle.to_tensor(tp_group.ranks)
         local_fp8_group_tensor_list = []

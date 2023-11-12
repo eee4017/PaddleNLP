@@ -783,14 +783,6 @@ class Trainer:
 
         self.timers and self.timers("read-data").start()
 
-        _enable_profile = int(os.environ.get("ENABLE_PROFILE", 0))
-        _start_step = int(os.environ.get("PROFILE_START_STEP", 0))
-        _stop_step = int(os.environ.get("PROFILE_STOP_STEP", 0))
-        _emit_nvtx = int(os.environ.get("PROFILE_EMIT_NVTX", 0))
-
-        if _enable_profile and _emit_nvtx:
-            paddle.fluid.core.nvprof_enable_record_event()
-
         for epoch in range(epochs_trained, num_train_epochs):
             if isinstance(train_dataloader, paddle.io.DataLoader) and isinstance(
                 train_dataloader.batch_sampler, DistributedBatchSampler
@@ -801,11 +793,6 @@ class Trainer:
             self.control = self.callback_handler.on_epoch_begin(args, self.state, self.control)
 
             for step, inputs in enumerate(epoch_iterator):
-                if _enable_profile and step == _start_step:
-                    paddle.fluid.core.nvprof_start()
-                if _enable_profile and step == _stop_step + 1:
-                    paddle.fluid.core.nvprof_stop()
-
                 self.timers and self.timers("read-data").stop()
                 os.environ["TRAINER_GLOBAL_STEP"] = str(self.state.global_step)
                 self.callback_handler.on_load_data_end(args, self.state, self.control, inputs=inputs)
