@@ -19,6 +19,8 @@ import sys
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+import wandb
+from paddlenlp.trainer.integrations import TrainerCallback
 
 import paddle
 
@@ -276,7 +278,10 @@ class PretrainingTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix: str = "eval"):
+    def evaluate(self,
+                 eval_dataset=None,
+                 ignore_keys=None,
+                 metric_key_prefix: str = "eval"):
         # keep eval_dataloader
         eval_dataloader = getattr(self, "eval_dataloader", None)
         if eval_dataloader is None:
@@ -308,12 +313,12 @@ class PretrainingTrainer(Trainer):
                 start_time,
                 num_samples=output.num_samples,
                 num_steps=math.ceil(output.num_samples / total_batch_size),
-            )
-        )
+            ))
 
         self.log(output.metrics)
 
-        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output.metrics)
+        self.control = self.callback_handler.on_evaluate(
+            self.args, self.state, self.control, output.metrics)
         return output.metrics
 
     def _get_eval_sampler(self, eval_dataset) -> Optional[paddle.io.Sampler]:
@@ -336,6 +341,19 @@ class PretrainingTrainer(Trainer):
             drop_last=self.args.dataloader_drop_last,
         )
 
+class WandbCallback(TrainerCallback):
+    def __init__(self):
+        super().__init__()
+
+    def on_log(self,
+               args,
+               state,
+               control,
+               logs=None,
+               inputs=None,
+               timer=None,
+               **kwargs):
+        wandb.log(logs)
 
 def main():
     parser = PdArgumentParser((ModelArguments, DataArguments, PreTrainingArguments))
@@ -365,6 +383,15 @@ def main():
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, world_size: {training_args.world_size}, "
         + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16 or training_args.bf16}"
+    )
+
+    wandb.init(
+        project=os.environ['PADDLENLP_WANDB_PROJECT_NAME'],
+        group=os.environ['PADDLENLP_WANDB_EXP_NAME'],
+        name=f"rank_{training_args.local_rank}_device_{training_args.device}_world_size_{training_args.world_size}",
+        config={
+            **vars(model_args), **vars(data_args), **vars(training_args)
+        }
     )
 
     # Detecting last checkpoint.
@@ -472,6 +499,8 @@ def main():
         logger.info("No checkpoint. Initializing model from scratch")
         model.init_weights()
 
+    callbacks = [WandbCallback()]
+
     trainer = PretrainingTrainer(
         model=model,
         args=training_args,
@@ -480,6 +509,7 @@ def main():
         eval_dataset=eval_dataset if training_args.do_eval else None,
         optimizers=(None, lr_scheduler),
         tokenizer=tokenizer,
+        callbacks=callbacks
     )
 
     if model_args.te_init_weight_path is not None:
