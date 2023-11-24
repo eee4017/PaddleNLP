@@ -379,20 +379,22 @@ def main():
     training_args.print_config(model_args, "Model")
     training_args.print_config(data_args, "Data")
 
+    node_idx = os.environ['SLURM_NODEID']
     # Log on each process the small summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, world_size: {training_args.world_size}, "
         + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16 or training_args.bf16}"
     )
 
-    wandb.init(
-        project=os.environ['PADDLENLP_WANDB_PROJECT_NAME'],
-        group=os.environ['PADDLENLP_WANDB_EXP_NAME'],
-        name=f"rank_{training_args.local_rank}_device_{training_args.device}_world_size_{training_args.world_size}",
-        config={
-            **vars(model_args), **vars(data_args), **vars(training_args)
-        }
-    )
+    if training_args.local_rank == 0:
+        wandb.init(
+            project=os.environ['PADDLENLP_WANDB_PROJECT_NAME'],
+            group=os.environ['PADDLENLP_WANDB_EXP_NAME'],
+            name=f"node_{node_idx}_rank_{training_args.local_rank}_device_{training_args.device}_world_size_{training_args.world_size}",
+            config={
+                **vars(model_args), **vars(data_args), **vars(training_args)
+            }
+        )
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -499,7 +501,9 @@ def main():
         logger.info("No checkpoint. Initializing model from scratch")
         model.init_weights()
 
-    callbacks = [WandbCallback()]
+    callbacks = []
+    if training_args.local_rank == 0:
+        callbacks.append(WandbCallback())
 
     trainer = PretrainingTrainer(
         model=model,
